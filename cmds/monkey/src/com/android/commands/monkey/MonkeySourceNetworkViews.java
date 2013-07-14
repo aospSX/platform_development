@@ -18,15 +18,14 @@ package com.android.commands.monkey;
 
 import static com.android.commands.monkey.MonkeySourceNetwork.EARG;
 
-import android.accessibilityservice.IAccessibilityServiceConnection;
-import android.accessibilityservice.IEventListener;
-import android.content.Context;
+import android.accessibilityservice.UiTestAutomationBridge;
 import android.content.pm.IPackageManager;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Rect;
 import android.os.ServiceManager;
 import android.os.RemoteException;
 import android.os.SystemClock;
+import android.os.UserHandle;
 import android.util.Log;
 import android.view.accessibility.AccessibilityInteractionClient;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -52,6 +51,7 @@ import java.util.ArrayList;
  * Script commands over the network.
  */
 public class MonkeySourceNetworkViews {
+    protected static UiTestAutomationBridge sUiTestAutomationBridge;
     private static final String TAG = "MonkeyViews";
 
     private static final int TIMEOUT_REGISTER_EVENT_LISTENER = 2000;
@@ -60,7 +60,6 @@ public class MonkeySourceNetworkViews {
 
     private static volatile AtomicReference<AccessibilityEvent> sLastAccessibilityEvent
             = new AtomicReference<AccessibilityEvent>();
-    protected static int sConnectionId;
     private static IPackageManager sPm =
             IPackageManager.Stub.asInterface(ServiceManager.getService("package"));
     private static Map<String, Class<?>> sClassMap = new HashMap<String, Class<?>>();
@@ -100,75 +99,14 @@ public class MonkeySourceNetworkViews {
         COMMAND_MAP.put("getaccessibilityids", new GetAccessibilityIds());
     }
 
-    private static int getConnection() throws RemoteException {
-        if (sConnectionId != NO_ID) {
-            return sConnectionId;
-        }
-        IEventListener listener = new IEventListener.Stub() {
-            public void setConnection(IAccessibilityServiceConnection connection,
-                    int connectionId) {
-                sConnectionId = connectionId;
-                if (connection != null) {
-                    AccessibilityInteractionClient.getInstance().addConnection(connectionId,
-                            connection);
-                } else {
-                    AccessibilityInteractionClient.getInstance().removeConnection(connectionId);
-                }
-                synchronized (MonkeySourceNetworkViews.class) {
-                    notifyAll();
-                }
-            }
-
-            public void onInterrupt() {}
-
-            public void onAccessibilityEvent(AccessibilityEvent event) {
-                Log.d(TAG, "Accessibility Event");
-                sLastAccessibilityEvent.set(AccessibilityEvent.obtain(event));
-                synchronized (MonkeySourceNetworkViews.class) {
-                    notifyAll();
-                }
-            }
-        };
-
-        IAccessibilityManager manager = IAccessibilityManager.Stub.asInterface(
-                ServiceManager.getService(Context.ACCESSIBILITY_SERVICE));
-
-        final long beginTime = SystemClock.uptimeMillis();
-        synchronized (MonkeySourceNetworkViews.class) {
-            manager.registerEventListener(listener);
-            while (true) {
-                if (sConnectionId != NO_ID) {
-                    return sConnectionId;
-                }
-                final long elapsedTime = (SystemClock.uptimeMillis() - beginTime);
-                final long remainingTime = TIMEOUT_REGISTER_EVENT_LISTENER - elapsedTime;
-                if (remainingTime <= 0) {
-                    if (sConnectionId == NO_ID) {
-                        throw new IllegalStateException("Cound not register IEventListener.");
-                    }
-                    return sConnectionId;
-                }
-                try {
-                    MonkeySourceNetworkViews.class.wait(remainingTime);
-                } catch (InterruptedException ie) {
-                    /* ignore */
-                }
-            }
-        }
-    }
-
     /**
      * Registers the event listener for AccessibilityEvents.
      * Also sets up a communication connection so we can query the
      * accessibility service.
      */
     public static void setup() {
-        try {
-            sConnectionId = getConnection();
-        } catch (RemoteException re) {
-            Log.e(TAG,"Remote Exception encountered when"
-                  + " attempting to connect to Accessibility Service");
-        }
+        sUiTestAutomationBridge = new UiTestAutomationBridge();
+        sUiTestAutomationBridge.connect();
     }
 
 
@@ -217,7 +155,7 @@ public class MonkeySourceNetworkViews {
         try {
             AccessibilityNodeInfo node = event.getSource();
             String packageName = node.getPackageName().toString();
-            ApplicationInfo appInfo = sPm.getApplicationInfo(packageName, 0);
+            ApplicationInfo appInfo = sPm.getApplicationInfo(packageName, 0, UserHandle.myUserId());
             Class<?> klass;
             klass = getIdClass(packageName, appInfo.sourceDir);
             return klass.getField(stringId).getInt(null);
@@ -240,15 +178,15 @@ public class MonkeySourceNetworkViews {
             String windowString, String viewString) {
         int windowId = Integer.parseInt(windowString);
         int viewId = Integer.parseInt(viewString);
-        return AccessibilityInteractionClient.getInstance()
-            .findAccessibilityNodeInfoByAccessibilityId(sConnectionId, windowId, viewId);
+        return sUiTestAutomationBridge.findAccessibilityNodeInfoByAccessibilityId(windowId,
+                viewId);
     }
 
     private static AccessibilityNodeInfo getNodeByViewId(String viewId, AccessibilityEvent event)
             throws MonkeyViewException {
         int id = getId(viewId, event);
-        return AccessibilityInteractionClient.getInstance()
-            .findAccessibilityNodeInfoByViewIdInActiveWindow(sConnectionId, id);
+        return sUiTestAutomationBridge.findAccessibilityNodeInfoByViewId(
+                UiTestAutomationBridge.ACTIVE_WINDOW_ID, UiTestAutomationBridge.ROOT_NODE_ID, id);
     }
 
     /**
@@ -273,7 +211,7 @@ public class MonkeySourceNetworkViews {
             String packageName = node.getPackageName().toString();
             try{
                 Class<?> klass;
-                ApplicationInfo appInfo = sPm.getApplicationInfo(packageName, 0);
+                ApplicationInfo appInfo = sPm.getApplicationInfo(packageName, 0, UserHandle.myUserId());
                 klass = getIdClass(packageName, appInfo.sourceDir);
                 StringBuilder fieldBuilder = new StringBuilder();
                 Field[] fields = klass.getFields();
@@ -300,7 +238,7 @@ public class MonkeySourceNetworkViews {
         public MonkeyCommandReturn translateCommand(List<String> command,
                                                     CommandQueue queue) {
             if (command.size() > 2) {
-                if (sConnectionId < 0) {
+                if (!sUiTestAutomationBridge.isConnected()) {
                     return new MonkeyCommandReturn(false, NO_CONNECTION);
                 }
                 AccessibilityEvent lastEvent = sLastAccessibilityEvent.get();
@@ -372,13 +310,14 @@ public class MonkeySourceNetworkViews {
         // getviewswithtext "some text here"
         public MonkeyCommandReturn translateCommand(List<String> command,
                                                     CommandQueue queue) {
-            if (sConnectionId < 0) {
+            if (!sUiTestAutomationBridge.isConnected()) {
                 return new MonkeyCommandReturn(false, NO_CONNECTION);
             }
             if (command.size() == 2) {
                 String text = command.get(1);
-                List<AccessibilityNodeInfo> nodes = AccessibilityInteractionClient.getInstance()
-                    .findAccessibilityNodeInfosByViewTextInActiveWindow(sConnectionId, text);
+                List<AccessibilityNodeInfo> nodes = sUiTestAutomationBridge
+                    .findAccessibilityNodeInfosByText(UiTestAutomationBridge.ACTIVE_WINDOW_ID,
+                            UiTestAutomationBridge.ROOT_NODE_ID, text);
                 ViewIntrospectionCommand idGetter = new GetAccessibilityIds();
                 List<String> emptyArgs = new ArrayList<String>();
                 StringBuilder ids = new StringBuilder();

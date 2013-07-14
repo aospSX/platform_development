@@ -34,10 +34,4 @@ public class MonkeyTrackballEvent extends MonkeyMotionEvent {
     protected String getTypeLabel() {
         return "Trackball";
     }
-
-    @Override
-    protected boolean injectMotionEvent(IWindowManager iwm, MotionEvent me)
-            throws RemoteException {
-        return iwm.injectTrackballEvent(me, false);
-    }
 }

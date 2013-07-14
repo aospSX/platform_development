@@ -22171,6 +22171,8 @@
 	</class>
 	<class name="android/view/KeyCharacterMap" since="1">
 		<extends name="java/lang/Object" />
+                <implements name="android/os/Parcelable" since="16" />
+                <method name="&lt;init>()V" />
 		<method name="deviceHasKey(I)Z" since="3" />
 		<method name="deviceHasKeys([I)[Z" since="3" />
 		<method name="get(II)I" />
@@ -22189,6 +22191,7 @@
 		<field name="BUILT_IN_KEYBOARD" />
 		<field name="COMBINING_ACCENT" />
 		<field name="COMBINING_ACCENT_MASK" />
+                <field name="CREATOR" since="16" />
 		<field name="FULL" since="11" />
 		<field name="HEX_INPUT" />
 		<field name="MODIFIER_BEHAVIOR_CHORDED" since="11" />

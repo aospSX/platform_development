@@ -18,12 +18,12 @@ package com.android.commands.monkey;
 
 import android.content.ComponentName;
 import android.graphics.PointF;
+import android.hardware.display.DisplayManagerGlobal;
 import android.os.SystemClock;
 import android.view.Display;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-import android.view.WindowManagerImpl;
 
 import java.util.ArrayList;
 import java.util.Random;
@@ -248,7 +248,7 @@ public class MonkeySourceRandom implements MonkeyEventSource {
      *
      */
     private void generatePointerEvent(Random random, int gesture){
-        Display display = WindowManagerImpl.getDefault().getDefaultDisplay();
+        Display display = DisplayManagerGlobal.getInstance().getRealDisplay(Display.DEFAULT_DISPLAY);
 
         PointF p1 = randomPoint(random, display);
         PointF v1 = randomVector(random);
@@ -339,10 +339,6 @@ public class MonkeySourceRandom implements MonkeyEventSource {
      *
      */
     private void generateTrackballEvent(Random random) {
-        Display display = WindowManagerImpl.getDefault().getDefaultDisplay();
-
-        boolean drop = false;
-        int count = random.nextInt(10);
         for (int i = 0; i < 10; ++i) {
             // generate a small random step
             int dX = random.nextInt(10) - 5;

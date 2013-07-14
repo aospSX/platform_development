@@ -17,8 +17,11 @@
 package com.android.commands.monkey;
 
 import android.app.IActivityManager;
+import android.hardware.input.InputManager;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.view.IWindowManager;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 /**
  * monkey key event
@@ -33,7 +36,7 @@ public class MonkeyKeyEvent extends MonkeyEvent {
     private int mDeviceId = -1;
     private long mEventTime = -1;
 
-    private KeyEvent keyEvent = null;
+    private KeyEvent mKeyEvent;
 
     public MonkeyKeyEvent(int action, int keycode) {
         super(EVENT_TYPE_KEY);
@@ -43,7 +46,7 @@ public class MonkeyKeyEvent extends MonkeyEvent {
 
     public MonkeyKeyEvent(KeyEvent e) {
         super(EVENT_TYPE_KEY);
-        keyEvent = e;
+        mKeyEvent = e;
     }
 
     public MonkeyKeyEvent(long downTime, long eventTime, int action,
@@ -89,16 +92,16 @@ public class MonkeyKeyEvent extends MonkeyEvent {
      * @return the key event
      */
     private KeyEvent getEvent() {
-        if (keyEvent == null) {
+        if (mKeyEvent == null) {
             if (mDeviceId < 0) {
-                keyEvent = new KeyEvent(mAction, mKeyCode);
+                mKeyEvent = new KeyEvent(mAction, mKeyCode);
             } else {
                 // for scripts
-                keyEvent = new KeyEvent(mDownTime, mEventTime, mAction,
+                mKeyEvent = new KeyEvent(mDownTime, mEventTime, mAction,
                                         mKeyCode, mRepeatCount, mMetaState, mDeviceId, mScancode);
             }
         }
-        return keyEvent;
+        return mKeyEvent;
     }
 
     @Override
@@ -126,15 +129,24 @@ public class MonkeyKeyEvent extends MonkeyEvent {
             }
         }
 
-        // inject key event
-        try {
-            if (!iwm.injectKeyEvent(getEvent(), false)) {
-                return MonkeyEvent.INJECT_FAIL;
+        KeyEvent keyEvent = mKeyEvent;
+        if (keyEvent == null) {
+            long eventTime = mEventTime;
+            if (eventTime <= 0) {
+                eventTime = SystemClock.uptimeMillis();
             }
-        } catch (RemoteException ex) {
-            return MonkeyEvent.INJECT_ERROR_REMOTE_EXCEPTION;
+            long downTime = mDownTime;
+            if (downTime <= 0) {
+                downTime = eventTime;
+            }
+            keyEvent = new KeyEvent(downTime, eventTime, mAction, mKeyCode,
+                    mRepeatCount, mMetaState, mDeviceId, mScancode,
+                    KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
         }
-
+        if (!InputManager.getInstance().injectInputEvent(keyEvent,
+                InputManager.INJECT_INPUT_EVENT_MODE_WAIT_FOR_RESULT)) {
+            return MonkeyEvent.INJECT_FAIL;
+        }
         return MonkeyEvent.INJECT_SUCCESS;
     }
 }
